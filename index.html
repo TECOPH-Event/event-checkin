@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Event Check-In</title>
+
+  <script src="https://unpkg.com/html5-qrcode"></script>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 20px;
+      background: #f5f5f5;
+      text-align: center;
+    }
+
+    .container {
+      width: 100%;
+      max-width: 500px;
+      margin: 0 auto;
+      background: white;
+      padding: 25px;
+      border-radius: 15px;
+      box-shadow: 0 3px 15px rgba(0, 0, 0, 0.10);
+    }
+
+    h1 {
+      margin-top: 0;
+      font-size: 28px;
+    }
+
+    p {
+      font-size: 17px;
+    }
+
+    #reader {
+      width: 100%;
+      margin-top: 20px;
+    }
+
+    #status {
+      display: none;
+      margin-top: 20px;
+      padding: 20px;
+      border-radius: 10px;
+      font-size: 18px;
+      font-weight: bold;
+      line-height: 1.5;
+    }
+
+    .scanning {
+      background: #e8eefc;
+      color: #234a91;
+    }
+
+    .success {
+      background: #dff5e1;
+      color: #176b2c;
+    }
+
+    .already {
+      background: #fff1cc;
+      color: #805b00;
+    }
+
+    .invalid {
+      background: #ffdede;
+      color: #a00000;
+    }
+
+    .error {
+      background: #ffdede;
+      color: #a00000;
+    }
+  </style>
+</head>
+
+<body>
+
+<div class="container">
+
+  <h1>EVENT CHECK-IN</h1>
+
+  <p>Scan the attendee's QR code.</p>
+
+  <div id="reader"></div>
+
+  <div id="status"></div>
+
+</div>
+
+
+<script>
+
+const APPS_SCRIPT_URL =
+  "https://script.google.com/macros/s/AKfycbyE3LPI48GbGXSz36YcDcDfKRSS6QJNY4eab8Jo28rMxtUeIuCOSeX86xhsVYJSZpbwZA/exec";
+
+
+let scanner = null;
+let processing = false;
+
+
+function startScanner() {
+
+  scanner = new Html5Qrcode("reader");
+
+  scanner.start(
+    { facingMode: "environment" },
+
+    {
+      fps: 10,
+      qrbox: {
+        width: 250,
+        height: 250
+      }
+    },
+
+    onScanSuccess,
+    onScanFailure
+
+  ).catch(function(error) {
+
+    showStatus(
+      "Unable to access the camera.<br><br>" +
+      "Please allow camera access in Safari.",
+      "invalid"
+    );
+
+  });
+
+}
+
+
+function onScanSuccess(decodedText) {
+
+  if (processing) return;
+
+  processing = true;
+
+  const attendeeId = decodedText.trim();
+
+  if (!attendeeId) {
+
+    processing = false;
+
+    showStatus(
+      "✕ INVALID QR CODE",
+      "invalid"
+    );
+
+    return;
+  }
+
+
+  showStatus(
+    "Checking attendee...<br><br>" +
+    "<strong>" + attendeeId + "</strong>",
+    "scanning"
+  );
+
+
+  const callbackName =
+    "checkInCallback_" + Date.now();
+
+
+  const requestUrl =
+    APPS_SCRIPT_URL +
+    "?attendeeId=" +
+    encodeURIComponent(attendeeId) +
+    "&callback=" +
+    callbackName;
+
+
+  window[callbackName] = function(result) {
+
+    handleResult(result);
+
+    try {
+
+      delete window[callbackName];
+
+    } catch (e) {
+
+      window[callbackName] = undefined;
+
+    }
+
+  };
+
+
+  const script =
+    document.createElement("script");
+
+
+  script.src = requestUrl;
+
+
+  script.onerror = function() {
+
+    showStatus(
+      "✕ CONNECTION ERROR<br><br>" +
+      "Please check your internet connection and try again.",
+      "error"
+    );
+
+    processing = false;
+
+
+    if (script.parentNode) {
+
+      script.parentNode.removeChild(script);
+
+    }
+
+  };
+
+
+  document.body.appendChild(script);
+
+}
+
+
+function handleResult(result) {
+
+  if (result.status === "success") {
+
+    showStatus(
+
+      "✓ CHECK-IN SUCCESSFUL<br><br>" +
+
+      "<strong>" +
+      (result.name || "") +
+      "</strong><br>" +
+
+      (result.organization || "") +
+
+      "<br><br>" +
+
+      "Attendee ID: " +
+      result.attendeeId,
+
+      "success"
+
+    );
+
+  }
+
+
+  else if (result.status === "already_checked_in") {
+
+    showStatus(
+
+      "⚠ ALREADY CHECKED IN<br><br>" +
+
+      "<strong>" +
+      (result.name || "") +
+      "</strong><br>" +
+
+      (result.organization || "") +
+
+      "<br><br>" +
+
+      "Attendee ID: " +
+      result.attendeeId +
+
+      "<br><br>" +
+
+      "This attendee has already been checked in.",
+
+      "already"
+
+    );
+
+  }
+
+
+  else if (result.status === "invalid") {
+
+    showStatus(
+
+      "✕ INVALID QR CODE<br><br>" +
+
+      "Attendee ID: " +
+
+      (result.attendeeId || "Unknown"),
+
+      "invalid"
+
+    );
+
+  }
+
+
+  else {
+
+    showStatus(
+
+      "✕ CHECK-IN ERROR<br><br>" +
+
+      (result.message ||
+      "Something went wrong."),
+
+      "error"
+
+    );
+
+  }
+
+
+  setTimeout(function() {
+
+    processing = false;
+
+    showStatus(
+      "Ready for next attendee.",
+      "scanning"
+    );
+
+  }, 2500);
+
+}
+
+
+function onScanFailure(error) {
+  // Do nothing.
+}
+
+
+function showStatus(message, type) {
+
+  const status =
+    document.getElementById("status");
+
+  status.innerHTML = message;
+
+  status.className = type;
+
+  status.style.display = "block";
+
+}
+
+
+window.addEventListener("load", function() {
+
+  startScanner();
+
+});
+
+</script>
+
+</body>
+</html>
